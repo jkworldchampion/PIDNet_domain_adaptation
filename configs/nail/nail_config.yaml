@@ -1,0 +1,50 @@
+# configs/nail/nail_config.yaml
+
+MODEL:
+  NAME: pidnet_small   # 또는 pidnet_medium, pidnet_large.  pidnet_large로 하면 OOM 뜰 수 있음.
+  NUM_OUTPUTS: 1       # Binary classification
+  PRETRAINED: 'pretrained_models/imagenet/PIDNet_L_ImageNet.pth.tar'  # ImageNet pretrained 모델로 변경
+  EXTRA_LOSS: False    # True or False, 필요에 따라
+
+DATASET:
+  DATASET: 'nail'
+  ROOT: 'data/nail/'       # nail 폴더를 DATASET의 ROOT로 지정.
+  TRAIN_SET: 'list/nail/train.lst'
+  TEST_SET: 'list/nail/test.lst'
+  EXTRA_TRAIN_SET: 'list/nail/extra_train.lst'  # Unlabeled data list
+  NUM_CLASSES: 2 # 클래스 개수 2 (배경, 손톱)
+
+TRAIN:
+  IMAGE_SIZE: [512, 512]
+  BATCH_SIZE_PER_GPU: 2
+  SHUFFLE: True
+  BEGIN_EPOCH: 0
+  END_EPOCH: 200
+  LR: 0.001
+  OPTIMIZER: 'adam'
+  WD: 0.0001
+  EMA_ALPHA: 0.999     # EMA decay rate 추가
+
+  # Domain Adaptation 관련 설정 (필요시)
+  # SOURCE_DATASET: 'cityscapes'  # Source domain (Cityscapes)
+  # TARGET_DATASET: 'nail'       # Target domain (Nail)
+
+LOSS:
+  USE_OHEM: False        # OHEM 사용 여부. True로 설정하면 아래 파라미터 설정 필요.
+  # OHEMTHRES: 0.7     # OHEM threshold (USE_OHEM=True일 때)
+  # OHEMKEEP: 100000   # OHEM kept pixels (USE_OHEM=True일 때)
+  BALANCE_WEIGHTS: [1.0, 1.0]   # 클래스 불균형에 따른 가중치.  [배경 가중치, 손톱 가중치]
+  SB_WEIGHTS: 1.0         # Boundary loss 가중치 (사용하는 경우)
+
+TEST:
+  IMAGE_SIZE: [512, 512]
+  BATCH_SIZE_PER_GPU: 1
+  MODEL_FILE: ''          # 테스트 시 지정
+  # OUTPUT_INDEX: 0          # Sigmoid 출력 인덱스.  BCEWithLogitsLoss를 쓰므로 필요 없음.
+
+CUDNN: # 추가
+  BENCHMARK: True
+  DETERMINISTIC: False
+  ENABLED: True
+
+GPUS: [0] # 추가, GPU 번호

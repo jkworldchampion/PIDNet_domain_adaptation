@@ -18,43 +18,43 @@ import torch.nn as nn
 import torch.nn.functional as F
 from configs import config
 
-class FullModel(nn.Module):
+# class FullModel(nn.Module): # 삭제
 
-  def __init__(self, model, sem_loss, bd_loss):
-    super(FullModel, self).__init__()
-    self.model = model
-    self.sem_loss = sem_loss
-    self.bd_loss = bd_loss
+#   def __init__(self, model, sem_loss, bd_loss):
+#     super(FullModel, self).__init__()
+#     self.model = model
+#     self.sem_loss = sem_loss
+#     self.bd_loss = bd_loss
 
-  def pixel_acc(self, pred, label):
-    _, preds = torch.max(pred, dim=1)
-    valid = (label >= 0).long()
-    acc_sum = torch.sum(valid * (preds == label).long())
-    pixel_sum = torch.sum(valid)
-    acc = acc_sum.float() / (pixel_sum.float() + 1e-10)
-    return acc
+#   def pixel_acc(self, pred, label):
+#     _, preds = torch.max(pred, dim=1)
+#     valid = (label >= 0).long()
+#     acc_sum = torch.sum(valid * (preds == label).long())
+#     pixel_sum = torch.sum(valid)
+#     acc = acc_sum.float() / (pixel_sum.float() + 1e-10)
+#     return acc
 
-  def forward(self, inputs, labels, bd_gt, *args, **kwargs):
-    
-    outputs = self.model(inputs, *args, **kwargs)
-    
-    h, w = labels.size(1), labels.size(2)
-    ph, pw = outputs[0].size(2), outputs[0].size(3)
-    if ph != h or pw != w:
-        for i in range(len(outputs)):
-            outputs[i] = F.interpolate(outputs[i], size=(
-                h, w), mode='bilinear', align_corners=config.MODEL.ALIGN_CORNERS)
+#   def forward(self, inputs, labels, bd_gt, *args, **kwargs):
 
-    acc  = self.pixel_acc(outputs[-2], labels)
-    loss_s = self.sem_loss(outputs[:-1], labels)
-    loss_b = self.bd_loss(outputs[-1], bd_gt)
+#     outputs = self.model(inputs, *args, **kwargs)
 
-    filler = torch.ones_like(labels) * config.TRAIN.IGNORE_LABEL
-    bd_label = torch.where(F.sigmoid(outputs[-1][:,0,:,:])>0.8, labels, filler)
-    loss_sb = self.sem_loss(outputs[-2], bd_label)
-    loss = loss_s + loss_b + loss_sb
+#     h, w = labels.size(1), labels.size(2)
+#     ph, pw = outputs[0].size(2), outputs[0].size(3)
+#     if ph != h or pw != w:
+#         for i in range(len(outputs)):
+#             outputs[i] = F.interpolate(outputs[i], size=(
+#                 h, w), mode='bilinear', align_corners=config.MODEL.ALIGN_CORNERS)
 
-    return torch.unsqueeze(loss,0), outputs[:-1], acc, [loss_s, loss_b]
+#     acc  = self.pixel_acc(outputs[-2], labels)
+#     loss_s = self.sem_loss(outputs[:-1], labels)
+#     loss_b = self.bd_loss(outputs[-1], bd_gt)
+
+#     filler = torch.ones_like(labels) * config.TRAIN.IGNORE_LABEL
+#     bd_label = torch.where(F.sigmoid(outputs[-1][:,0,:,:])>0.8, labels, filler)
+#     loss_sb = self.sem_loss(outputs[-2], bd_label)
+#     loss = loss_s + loss_b + loss_sb
+
+#     return torch.unsqueeze(loss,0), outputs[:-1], acc, [loss_s, loss_b]
 
 
 class AverageMeter(object):
@@ -130,11 +130,13 @@ def get_confusion_matrix(label, pred, size, num_class, ignore=-1):
     """
     Calcute the confusion matrix by given label and pred
     """
-    output = pred.cpu().numpy().transpose(0, 2, 3, 1)
-    seg_pred = np.asarray(np.argmax(output, axis=3), dtype=np.uint8)
-    seg_gt = np.asarray(
-    label.cpu().numpy()[:, :size[-2], :size[-1]], dtype=np.int)
+    # output = pred.cpu().numpy().transpose(0, 2, 3, 1) # 삭제
+    # seg_pred = np.asarray(np.argmax(output, axis=3), dtype=np.uint8) # 삭제
+    # seg_gt = np.asarray(
+    # label.cpu().numpy()[:, :size[-2], :size[-1]], dtype=np.int) # 삭제
 
+    seg_gt = label.flatten() # 수정
+    seg_pred = pred.flatten() # 수정
     ignore_index = seg_gt != ignore
     seg_gt = seg_gt[ignore_index]
     seg_pred = seg_pred[ignore_index]
@@ -151,10 +153,36 @@ def get_confusion_matrix(label, pred, size, num_class, ignore=-1):
                                  i_pred] = label_count[cur_index]
     return confusion_matrix
 
-def adjust_learning_rate(optimizer, base_lr, max_iters, 
+def adjust_learning_rate(optimizer, base_lr, max_iters,
         cur_iters, power=0.9, nbb_mult=10):
     lr = base_lr*((1-float(cur_iters)/max_iters)**(power))
     optimizer.param_groups[0]['lr'] = lr
     if len(optimizer.param_groups) == 2:
         optimizer.param_groups[1]['lr'] = lr * nbb_mult
     return lr
+
+def compute_miou(preds, targets, num_classes, ignore_index=255):
+
+    confusion_matrix = np.zeros((num_classes, num_classes))
+    for pred, target in zip(preds, targets):
+        pred = pred.flatten()
+        target = target.flatten()
+        mask = (target != ignore_index)
+        pred = pred[mask]
+        target = target[mask]
+        index = (target * num_classes + pred).astype('int32')
+        label_count = np.bincount(index)
+        for i_label in range(num_classes):
+            for i_pred in range(num_classes):
+                cur_index = i_label * num_classes + i_pred
+                if cur_index < len(label_count):
+                    confusion_matrix[i_label, i_pred] = label_count[cur_index]
+    pos = confusion_matrix.sum(1)
+    res = confusion_matrix.sum(0)
+    tp = np.diag(confusion_matrix)
+    pixel_acc = tp.sum()/pos.sum()
+    mean_acc = (tp/np.maximum(1.0, pos)).mean()
+    IoU_array = (tp / np.maximum(1.0, pos + res - tp))
+    mean_IoU = IoU_array.mean()
+
+    return mean_IoU, IoU_array, pixel_acc, mean_acc

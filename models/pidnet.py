@@ -89,7 +89,15 @@ class PIDNet(nn.Module):
             self.seghead_p = segmenthead(planes * 2, head_planes, num_classes)
             self.seghead_d = segmenthead(planes * 2, planes, 1)           
 
-        self.final_layer = segmenthead(planes * 4, head_planes, num_classes)
+        # 아래의 기존 코드를 수정하여, 1개의 output channel을 가지는 binary segmentation으로 변경
+        # self.final_layer = segmenthead(planes * 4, head_planes, num_classes)
+        self.final_layer = nn.Sequential(
+            nn.Conv2d(planes * 4, head_planes, kernel_size=3, padding=1, bias=False),
+            BatchNorm2d(head_planes, momentum=bn_mom),
+            nn.ReLU(inplace=True),
+            nn.Conv2d(head_planes, 1, kernel_size=1, bias=True),  # 1 output channel for binary
+            nn.Sigmoid()  # Sigmoid activation
+        )
 
 
         for m in self.modules():
@@ -231,7 +239,7 @@ if __name__ == '__main__':
     # Comment batchnorms here and in model_utils before testing speed since the batchnorm could be integrated into conv operation
     # (do not comment all, just the batchnorm following its corresponding conv layer)
     device = torch.device('cuda')
-    model = get_pred_model(name='pidnet_s', num_classes=19)
+    model = get_pred_model(name='pidnet_s', num_classes=1)  # 원래의 19에서 2로 변경
     model.eval()
     model.to(device)
     iterations = None
