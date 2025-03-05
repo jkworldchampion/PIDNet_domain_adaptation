@@ -1,2 +1,4 @@
 data/camvid
 data/cityscapes
+pretrained_models/imagenet
+pretrained_models/cityscapes

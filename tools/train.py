@@ -25,7 +25,7 @@ from configs import config
 from configs import update_config
 from utils.criterion import BondaryLoss  # BoundaryLoss는 그대로 사용
 from utils.function import validate  # validate 함수는 그대로 사용
-from utils.utils import create_logger
+from utils.utils import create_logger, AverageMeter, inter_and_union, collate_fn  # collate_fn 사용
 import yaml
 
 
@@ -46,9 +46,9 @@ def parse_args():
     return args
 
 
-def create_teacher(config, imgnet_pretrained):
+def create_teacher(config, imgnet_pretrained, augment=True):
     """Create a teacher model with the same architecture."""
-    teacher_model = models.pidnet.get_seg_model(config, imgnet_pretrained=imgnet_pretrained)
+    teacher_model = models.pidnet.get_seg_model(config, imgnet_pretrained=imgnet_pretrained, augment=augment)
     return teacher_model
 
 def update_ema_variables(model, ema_model, alpha, global_step):
@@ -105,8 +105,8 @@ def main():
     imgnet = 'imagenet' in config.MODEL.PRETRAINED
     model = models.pidnet.get_seg_model(config, imgnet_pretrained=imgnet)
     # Teacher model initialization
-    teacher_model1 = create_teacher(config, imgnet_pretrained=imgnet).cuda()
-    teacher_model2 = create_teacher(config, imgnet_pretrained=imgnet).cuda()  # 두번째 teacher
+    teacher_model1 = create_teacher(config, imgnet_pretrained=imgnet, augment=True).cuda() # augmentation 사용하지 않음
+    teacher_model2 = create_teacher(config, imgnet_pretrained=imgnet, augment=True).cuda()  # 두번째 teacher
 
     # Freeze teacher model
     for p in teacher_model1.parameters():
@@ -127,26 +127,33 @@ def main():
         batch_size=batch_size,
         shuffle=config.TRAIN.SHUFFLE,
         num_workers=config.WORKERS,
-        pin_memory=False,
-        drop_last=True)
+        pin_memory=True,
+        drop_last=True,
+        collate_fn=collate_fn  # collate_fn 사용
+        )
 
     extra_train_loader = torch.utils.data.DataLoader(
         extra_train_dataset,
         batch_size=batch_size,
         shuffle=config.TRAIN.SHUFFLE,
         num_workers=config.WORKERS,
-        pin_memory=False,
-        drop_last=True)
+        pin_memory=True,
+        drop_last=True,
+        collate_fn=collate_fn  # collate_fn 사용
+        )
 
     test_loader = torch.utils.data.DataLoader(
         test_dataset,
         batch_size=config.TEST.BATCH_SIZE_PER_GPU * len(gpus),
         shuffle=False,
         num_workers=config.WORKERS,
-        pin_memory=False)
+        pin_memory=True,
+        collate_fn=collate_fn  # collate_fn 사용
+        )
 
     # Loss function
-    criterion = nn.BCEWithLogitsLoss()  # 2진 분류 Loss
+    # criterion = nn.BCEWithLogitsLoss()  # 2진 분류 Loss
+    criterion = nn.CrossEntropyLoss()  # CrossEntropyLoss 사용
     bd_criterion = BondaryLoss()
 
     model = nn.DataParallel(model, device_ids=gpus).cuda()
@@ -198,16 +205,27 @@ def main():
         current_teacher = teacher_model1 if epoch % 2 == 0 else teacher_model2
         other_teacher = teacher_model2 if epoch % 2 == 0 else teacher_model1
 
+        for i, (input, target, img_name) in enumerate(train_loader):  # Labeled data
 
-
-        for i, (input, target, _) in enumerate(train_loader):  # Labeled data
-
-            # input = input.cuda() # 이미 nail.py에서 cuda()처리
-            # target = target.cuda()
-            target = target.unsqueeze(1).float()
+            # GPU로 데이터 이동
+            input = input.cuda()
+            target = target.cuda()  # unsqueeze(1)은 이미 적용됨
 
             labeled_output = model(input)  # Forward pass labeled data
-            labeled_loss = criterion(labeled_output, target)  # Supervised loss
+            # labeled_output이 list인 경우 첫번째 요소만 사용
+            if isinstance(labeled_output, list):
+                labeled_output = labeled_output[0]
+
+            # target을 labeled_output 크기에 맞게 리사이즈
+            # target = F.interpolate(target.unsqueeze(1).float(), size=labeled_output.shape[2:], mode='nearest').squeeze(1).long() # .long() type으로
+            # target의 채널 수를 labeled_output의 채널 수에 맞추기 위해 반복
+            # target = target.repeat(1, labeled_output.shape[1], 1, 1)
+
+            # # 문제확인
+            # print(f"labeled_output size: {labeled_output.size()}")
+            # print(f"target size: {target.size()}")
+
+            labeled_loss = criterion(labeled_output, target)  # Supervised loss , CrossEntropyLoss사용
             loss = labeled_loss
 
             optimizer.zero_grad()
@@ -217,8 +235,6 @@ def main():
             # EMA update student -> current_teacher
             update_ema_variables(model, current_teacher, ema_alpha, writer_dict['train_global_steps'])
 
-
-
         # Unlabeled data, teacher-student training
         for i, (input_unlabeled, _, _) in enumerate(extra_train_loader):
             # input_unlabeled = input_unlabeled.cuda()
@@ -226,22 +242,38 @@ def main():
             with torch.no_grad():
                 # Teacher model prediction
                 teacher_output = current_teacher(input_unlabeled)
-                teacher_output = torch.sigmoid(teacher_output) # 확률값으로
+                # teacher_output이 list인 경우, 첫번째 요소 사용  -> 이 코드 삭제!
+                # if isinstance(teacher_output, list):
+                #     teacher_output = teacher_output[1]
+
+                # teacher_output = torch.sigmoid(teacher_output) # 확률값으로 -> 이 코드 삭제
 
                 # Teacher Thresholding , confidence masking
                 max_prob, max_idx = torch.max(teacher_output, dim=1) # unqueeze 불필요
                 threshold, hist = get_threshold(max_idx.flatten(), config.DATASET.NUM_CLASSES) # 클래스 개수
+
+                # confidence score 구하기 -> 이 코드 필요 없음
+                # confidence_score = F.softmax(teacher_output, dim=1).max(dim=1)[0]
+
+                # mask 만들기
                 mask = max_prob.ge(0.5).float()  # threshold = 0.5 사용
 
                 # 필터링 된 pseudo label 생성.
                 filtered_pseudo_labels = max_idx.unsqueeze(1) * mask  # (B, 1, H, W)
 
-
             # Student model prediction.
             student_output = model(input_unlabeled)
-            # Unsupervised loss (using pseudo labels)
-            unlabeled_loss = criterion(student_output, filtered_pseudo_labels.float())  * mask.mean() # 마스크 평균 곱해줌.
 
+            # student_output이 list인 경우 첫번째 요소만 사용
+            if isinstance(student_output, list):
+                student_output = student_output[0]
+
+            # student_output size를 teacher_output에 맞게 interpolation
+            # student_output = F.interpolate(student_output, size=filtered_pseudo_labels.size()[2:], mode='bilinear', align_corners=True) # size 맞추기
+
+            # Unsupervised loss (using pseudo labels)
+            # unlabeled_loss = criterion(student_output, filtered_pseudo_labels.float())  * mask.mean() # 마스크 평균 곱해줌. -> 이 부분을
+            unlabeled_loss = criterion(student_output, filtered_pseudo_labels.squeeze(1).long())  * mask.mean() # CrossEntropyLoss, long type
             loss = unlabeled_loss
             optimizer.zero_grad()
             loss.backward()
@@ -249,11 +281,10 @@ def main():
             optimizer.step()  # student 파라미터 업데이트
             # EMA update student -> current_teacher
             update_ema_variables(model, current_teacher, ema_alpha, writer_dict['train_global_steps'])
-             # EMA update student -> other_teacher
+            # EMA update student -> other_teacher
             update_ema_variables(model, other_teacher, ema_alpha, writer_dict['train_global_steps'])
 
             writer_dict['train_global_steps'] += 1  # global step 증가
-
 
         # Validation (5 epoch마다 또는 마지막 100 epoch)
         if (epoch % 5 == 0) or (epoch >= end_epoch - 100):

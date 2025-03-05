@@ -92,6 +92,25 @@ class AverageMeter(object):
     def average(self):
         return self.avg
 
+# inter_and_union 함수 추가
+def inter_and_union(pred, mask, K):
+    # K는 클래스 개수 (배경 포함)
+    pred = pred.view(-1)  # Flatten
+    mask = mask.view(-1)  # Flatten
+
+    # 교집합(intersection) 계산
+    intersection = np.zeros(K)  # 클래스 개수만큼 0으로 초기화
+    for k in range(K):
+        intersection[k] = ((pred == k) & (mask == k)).sum() # True, False로 계산
+
+    # 합집합(union) 계산
+    union = np.zeros(K)  # 클래스 개수만큼 0으로 초기화
+    for k in range(K):
+      union[k] = ((pred == k) | (mask == k)).sum()
+
+
+    return intersection, union
+
 def create_logger(cfg, cfg_name, phase='train'):
     root_output_dir = Path(cfg.OUTPUT_DIR)
     # set up logger
@@ -186,3 +205,31 @@ def compute_miou(preds, targets, num_classes, ignore_index=255):
     mean_IoU = IoU_array.mean()
 
     return mean_IoU, IoU_array, pixel_acc, mean_acc
+
+def collate_fn(batch):
+    images, targets, names = zip(*batch)  # Unpack the batch
+
+    # Find the maximum height and width
+    max_height = max(img.shape[1] for img in images)
+    max_width = max(img.shape[2] for img in images)
+
+    # Pad the images and targets
+    padded_images = []
+    padded_targets = []
+    for img, tar in zip(images, targets):
+        pad_height = max_height - img.shape[1]
+        pad_width = max_width - img.shape[2]
+
+        # Pad image (padding value 0, BGR format)
+        padded_img = np.pad(img, ((0, 0), (0, pad_height), (0, pad_width)), mode='constant', constant_values=0)
+        padded_images.append(torch.from_numpy(padded_img))
+
+
+        padded_tar = np.pad(tar, ((0, pad_height), (0, pad_width)), mode='constant', constant_values=0) # 수정된 부분
+        padded_targets.append(torch.from_numpy(padded_tar))
+
+    # Stack images and targets
+    images = torch.stack(padded_images, dim=0)
+    targets = torch.stack(padded_targets, dim=0)
+
+    return images, targets, list(names)

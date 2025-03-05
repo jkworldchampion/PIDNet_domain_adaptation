@@ -11,11 +11,12 @@ from tqdm import tqdm
 
 import torch
 from torch.nn import functional as F
+import torch.nn as nn
 
 from utils.utils import AverageMeter
 from utils.utils import get_confusion_matrix, compute_miou
 from utils.utils import adjust_learning_rate
-
+from utils.utils import AverageMeter, inter_and_union
 
 
 def train(cfg, epoch, num_epoch, epoch_iters, base_lr, num_iters,
@@ -89,75 +90,63 @@ def train(cfg, epoch, num_epoch, epoch_iters, base_lr, num_iters,
     writer.add_scalar('train_loss', ave_loss.average(), global_steps)
     writer_dict['train_global_steps'] = global_steps + 1
 
-def validate(cfg, testloader, model, writer_dict):
+def inter_and_union(pred, mask, K):
+    # K는 클래스 개수 (배경 포함)
+    pred = pred.view(-1)  # Flatten
+    mask = mask.view(-1)  # Flatten
+    
+    # 교집합(intersection) 계산
+    intersection = np.zeros(K)
+    for k in range(K):
+      intersection[k] = ((pred == k) & (mask == k)).sum() # True False로 계산.
+
+    # 합집합(union) 계산
+    union = np.zeros(K)
+    for k in range(K):
+      union[k] = ((pred == k) | (mask == k)).sum()
+
+    return intersection, union
+
+
+def validate(cfg, test_loader, model, writer_dict):
+
     model.eval()
     ave_loss = AverageMeter()
-    confusion_matrix = np.zeros((cfg.DATASET.NUM_CLASSES, cfg.DATASET.NUM_CLASSES))
-    criterion = nn.BCEWithLogitsLoss() # validate에도 criterion추가.
+    intersection_sum = np.zeros(cfg.DATASET.NUM_CLASSES)
+    union_sum = np.zeros(cfg.DATASET.NUM_CLASSES)
+
+    criterion = nn.CrossEntropyLoss()  # CrossEntropyLoss 사용
+
     with torch.no_grad():
-        for idx, (image, label) in enumerate(testloader): # bd_gts 삭제
-            # size = label.size() # 삭제
-            image = image.cuda()
-            label = label.cuda() # label.long().cuda() -> label.cuda()
-            # bd_gts = bd_gts.float().cuda() # 삭제
+        for i, (input, target,_) in enumerate(test_loader):
 
-            # losses, pred, _, _ = model(image, label, bd_gts) # 기존
-            output = model(image) # 수정
-            if cfg.MODEL.NUM_OUTPUTS == 1:
-              output = torch.squeeze(output)
-            loss = criterion(output, label) # loss 계산
-            
-            # if not isinstance(pred, (list, tuple)): # 삭제
-            #     pred = [pred]
-            # for i, x in enumerate(pred):
-            #     x = F.interpolate(
-            #         input=x, size=size[-2:],
-            #         mode='bilinear', align_corners=config.MODEL.ALIGN_CORNERS
-            #     )
+            input = input.cuda()
+            target = target.cuda()
+            output = model(input)
+            # 만약 output이 리스트 형태라면 첫 번째 요소만 사용
+            if isinstance(output, list):
+                output = output[0]
 
-            #     confusion_matrix[..., i] += get_confusion_matrix(
-            #         label,
-            #         x,
-            #         size,
-            #         config.DATASET.NUM_CLASSES,
-            #         config.TRAIN.IGNORE_LABEL
-            #     )
+            # output size에 맞게 target을 resize할 필요 없음!
 
-            # if idx % 10 == 0: # 삭제
-            #     print(idx)
+            loss = criterion(output, target)  # CrossEntropyLoss 사용
 
-            # loss = losses.mean() # 삭제
+            # prediction
+            pred = output.argmax(dim=1)  # CrossEntropyLoss를 위한 prediction
+
+            # binary segmentation에서는 0,1 두 class의 교집합, 합집합 계산
+            intersection, union = inter_and_union(pred.cpu().numpy(), target.cpu().numpy(), K=cfg.DATASET.NUM_CLASSES)
+            intersection_sum += intersection
+            union_sum += union
+
             ave_loss.update(loss.item())
 
-            # for i in range(nums): # 삭제
-            #     pos = confusion_matrix[..., i].sum(1)
-            #     res = confusion_matrix[..., i].sum(0)
-            #     tp = np.diag(confusion_matrix[..., i])
-            #     IoU_array = (tp / np.maximum(1.0, pos + res - tp))
-            #     mean_IoU = IoU_array.mean()
+    iou = intersection_sum / (union_sum + 1e-10)
+    mean_iou = iou.mean()
 
-            #     logging.info('{} {} {}'.format(i, IoU_array, mean_IoU))
-            pred = (output > 0.5).float()  # 예측 (0 또는 1)
-            confusion_matrix += get_confusion_matrix(
-                label.cpu().numpy(),
-                pred.cpu().numpy(),
-                size = None,  # 이제 size 필요 없음
-                num_classes=cfg.DATASET.NUM_CLASSES,
-                ignore_label=cfg.TRAIN.IGNORE_LABEL
-            )
+    writer_dict['valid_global_steps'] += 1
 
-    pos = confusion_matrix.sum(1)
-    res = confusion_matrix.sum(0)
-    tp = np.diag(confusion_matrix)
-    IoU_array = (tp / np.maximum(1.0, pos + res - tp))
-    mean_IoU = IoU_array.mean()
-
-    writer = writer_dict['writer']
-    global_steps = writer_dict['valid_global_steps']
-    writer.add_scalar('valid_loss', ave_loss.average(), global_steps)
-    writer.add_scalar('valid_mIoU', mean_IoU, global_steps)
-    writer_dict['valid_global_steps'] = global_steps + 1
-    return ave_loss.average(), mean_IoU, IoU_array
+    return ave_loss.average(), mean_iou, iou
 
 # testval 함수 삭제
 # def testval(config, test_dataset, testloader, model,

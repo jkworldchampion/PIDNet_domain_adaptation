@@ -14,7 +14,7 @@ class Nail(Dataset):
         self.std = np.array([0.229, 0.224, 0.225], dtype=np.float32)  # ImageNet std
 
         if self.is_extra:  # Unlabeled data
-            self.images_dir = os.path.join(self.root, 'non-label')
+            self.images_dir = os.path.join(self.root, 'non_label')
             self.image_paths = [os.path.join(self.images_dir, img_id) for img_id in sorted(os.listdir(self.images_dir))]
 
         else:  # Labeled data (train, val, test)
@@ -24,7 +24,7 @@ class Nail(Dataset):
                 data_type = 'test' if cfg.DATASET.TEST_SET else 'val'  # Use 'test' or 'val'
 
             self.images_dir = os.path.join(self.root, 'raw', f'{data_type}')
-            self.masks_dir = os.path.join(self.root, 'raw', f'{data_type}_label')
+            self.masks_dir = os.path.join(self.root, 'raw', f'{data_type}_labels')
             self.image_paths = [os.path.join(self.images_dir, img_id)
                                 for img_id in sorted(os.listdir(self.images_dir))]
             self.mask_paths = [os.path.join(self.masks_dir, img_id)
@@ -45,8 +45,9 @@ class Nail(Dataset):
             image = image.astype(np.float32) / 255.0
             image = (image - self.mean) / self.std
             image = image.transpose((2, 0, 1))
+            img_name = os.path.basename(img_path) # img_name추가
 
-            return torch.from_numpy(image.copy()), np.array(0, dtype=np.int64)  # Dummy label
+            return torch.from_numpy(image.copy()), torch.tensor(0, dtype=torch.float32), img_name   # Dummy label, img_name
 
 
         else:
@@ -55,13 +56,15 @@ class Nail(Dataset):
             mask_path = self.mask_paths[idx]
             image = cv2.imread(img_path, cv2.IMREAD_COLOR)
             image = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
-            image = cv2.resize(image, (self.input_size[1], self.input_size[0]), interpolation=cv2.INTER_LINEAR)
+            # image = cv2.resize(image, (self.input_size[1], self.input_size[0]), interpolation=cv2.INTER_LINEAR)  -> 이 부분 주석처리
             mask = cv2.imread(mask_path, cv2.IMREAD_GRAYSCALE)  # Load mask as grayscale
-            mask = cv2.resize(mask, (self.input_size[1], self.input_size[0]), interpolation=cv2.INTER_NEAREST)
-            mask = (mask > 127).astype(np.float32)  # Binarize
+            # mask = cv2.resize(mask, (self.input_size[1], self.input_size[0]), interpolation=cv2.INTER_NEAREST) -> 이 부분 주석처리
+            mask = (mask > 127).astype(np.int64)
+            # mask = np.expand_dims(mask, axis=0) -> 주석처리
 
             image = image.astype(np.float32) / 255.0
             image = (image - self.mean) / self.std
             image = image.transpose((2, 0, 1))
+            img_name = os.path.basename(img_path)
 
-            return torch.from_numpy(image.copy()), torch.from_numpy(mask.copy()).float()
+            return torch.from_numpy(image.copy()), torch.from_numpy(mask.copy()), img_name

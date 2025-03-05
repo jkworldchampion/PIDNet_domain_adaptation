@@ -96,7 +96,7 @@ class PIDNet(nn.Module):
             BatchNorm2d(head_planes, momentum=bn_mom),
             nn.ReLU(inplace=True),
             nn.Conv2d(head_planes, 1, kernel_size=1, bias=True),  # 1 output channel for binary
-            nn.Sigmoid()  # Sigmoid activation
+            # nn.Sigmoid()  # nn.BCEWithLogitsLoss()가 이미 sigmoid를 포함
         )
 
 
@@ -189,14 +189,14 @@ class PIDNet(nn.Module):
         else:
             return x_      
 
-def get_seg_model(cfg, imgnet_pretrained):
+def get_seg_model(cfg, imgnet_pretrained, augment=True):
     
     if 's' in cfg.MODEL.NAME:
-        model = PIDNet(m=2, n=3, num_classes=cfg.DATASET.NUM_CLASSES, planes=32, ppm_planes=96, head_planes=128, augment=True)
+        model = PIDNet(m=2, n=3, num_classes=cfg.DATASET.NUM_CLASSES, planes=32, ppm_planes=96, head_planes=128, augment=augment)
     elif 'm' in cfg.MODEL.NAME:
-        model = PIDNet(m=2, n=3, num_classes=cfg.DATASET.NUM_CLASSES, planes=64, ppm_planes=96, head_planes=128, augment=True)
+        model = PIDNet(m=2, n=3, num_classes=cfg.DATASET.NUM_CLASSES, planes=64, ppm_planes=96, head_planes=128, augment=augment)
     else:
-        model = PIDNet(m=3, n=4, num_classes=cfg.DATASET.NUM_CLASSES, planes=64, ppm_planes=112, head_planes=256, augment=True)
+        model = PIDNet(m=3, n=4, num_classes=cfg.DATASET.NUM_CLASSES, planes=64, ppm_planes=112, head_planes=256, augment=augment)
     
     if imgnet_pretrained:
         pretrained_state = torch.load(cfg.MODEL.PRETRAINED, map_location='cpu')['state_dict'] 

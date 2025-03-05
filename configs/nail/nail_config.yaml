@@ -24,6 +24,7 @@ TRAIN:
   OPTIMIZER: 'adam'
   WD: 0.0001
   EMA_ALPHA: 0.999     # EMA decay rate 추가
+  RESUME: False  # 추가: 학습 재개 여부 (기본값: False)
 
   # Domain Adaptation 관련 설정 (필요시)
   # SOURCE_DATASET: 'cityscapes'  # Source domain (Cityscapes)
@@ -42,9 +43,13 @@ TEST:
   MODEL_FILE: ''          # 테스트 시 지정
   # OUTPUT_INDEX: 0          # Sigmoid 출력 인덱스.  BCEWithLogitsLoss를 쓰므로 필요 없음.
 
-CUDNN: # 추가
+CUDNN:
   BENCHMARK: True
   DETERMINISTIC: False
   ENABLED: True
 
-GPUS: [0] # 추가, GPU 번호
+GPUS: [0]
+
+OUTPUT_DIR: 'output'
+LOG_DIR: 'log'
+WORKERS: 4

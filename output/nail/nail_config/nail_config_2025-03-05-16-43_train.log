@@ -1,0 +1,49 @@
+2025-03-05 16:43:20,506 Namespace(cfg='configs/nail/nail_config.yaml', opts=[], seed=304)
+2025-03-05 16:43:20,506 CUDNN:
+  BENCHMARK: True
+  DETERMINISTIC: False
+  ENABLED: True
+DATASET:
+  DATASET: nail
+  EXTRA_TRAIN_SET: list/nail/extra_train.lst
+  NUM_CLASSES: 2
+  ROOT: data/nail/
+  TEST_SET: list/nail/test.lst
+  TRAIN_SET: list/nail/train.lst
+GPUS: [0]
+LOG_DIR: log
+LOSS:
+  BALANCE_WEIGHTS: [1.0, 1.0]
+  SB_WEIGHTS: 1.0
+  USE_OHEM: False
+MODEL:
+  EXTRA_LOSS: False
+  NAME: pidnet_small
+  NUM_OUTPUTS: 1
+  PRETRAINED: pretrained_models/imagenet/PIDNet_L_ImageNet.pth.tar
+OUTPUT_DIR: output
+TEST:
+  BATCH_SIZE_PER_GPU: 1
+  IMAGE_SIZE: [512, 512]
+  MODEL_FILE: 
+TRAIN:
+  BATCH_SIZE_PER_GPU: 2
+  BEGIN_EPOCH: 0
+  EMA_ALPHA: 0.999
+  END_EPOCH: 200
+  IMAGE_SIZE: [512, 512]
+  LR: 0.001
+  OPTIMIZER: adam
+  RESUME: False
+  SHUFFLE: True
+  WD: 0.0001
+WORKERS: 4
+2025-03-05 16:43:20,699 Attention!!!
+2025-03-05 16:43:20,699 Loaded 58 parameters!
+2025-03-05 16:43:20,699 Over!!!
+2025-03-05 16:43:20,853 Attention!!!
+2025-03-05 16:43:20,853 Loaded 58 parameters!
+2025-03-05 16:43:20,853 Over!!!
+2025-03-05 16:43:21,116 Attention!!!
+2025-03-05 16:43:21,116 Loaded 58 parameters!
+2025-03-05 16:43:21,116 Over!!!
